@@ -2,16 +2,9 @@ from __future__ import annotations
 
 import heapq
 import unittest
-from enum import Enum
 from dataclasses import dataclass
 from typing import List, Iterable, Tuple, ClassVar, Set
 
-# 01 2 3 4 56
-#############
-# ..x.x.x.x..#
-###B#C#B#D###
-# A#D#C#A#
-#########
 
 distances = [
     [3, 5, 7, 9],
@@ -27,18 +20,19 @@ distances = [
     [9, 7, 5, 3]
 ]
 
-factors = {"a": 1, "b": 10, "c": 100, "d": 1000}
+factors = {"A": 1, "B": 10, "C": 100, "D": 1000}
 
 
 @dataclass(frozen=True, order=True)
 class Burrow:
     positions: List[str]
     depth: int
-    room_len = 2
+    room_len: int
     c_start: ClassVar[int] = 0
     c_end: ClassVar[int] = 10
     room_entrances: ClassVar[List[int]] = [2, 4, 6, 8]
     room_indices: ClassVar[List[int]] = [15, 20, 25, 30]
+    room_accepts: ClassVar[List[int]] = ["A", "B", "C", "D"]
 
     def moves(self) -> Iterable[Tuple[int, Burrow]]:
         # Calculate all possible moves and their cost from this
@@ -52,14 +46,9 @@ class Burrow:
                 for r in self.available_rooms(self.positions[c]):
                     if self.can_get_to_room(c, r):
                         # make the move and yield
-                        try:
-                            yield self.move_to_room(c, r)
-                        except Exception as e:
-                            self.print()
-                            print(f"move_to_room {c} {r}")
-                            raise
+                        yield self.move_to_room(c, r)
 
-                        # Then, any in a room which haven't already moved try to move into any corridor spot
+        # Then, any in a room which haven't already moved try to move into any corridor spot
         for r in range(len(self.room_indices)):
             if self.room_locked(r):
                 continue
@@ -70,34 +59,40 @@ class Burrow:
     def room_empty(self, r: int) -> bool:
         ri = self.room_indices[r]
         for i in range(self.room_len):
-            if self.positions[ri+i] != ".":
+            if self.positions[ri + i] != ".":
                 return False
         return True
 
     def room_locked(self, r: int) -> bool:
-        return self.room_empty(r) or self.room_complete(r)
+        return self.room_empty(r) or self.room_complete(r) or self.room_semi_complete(r)
 
     def room_complete(self, r: int) -> bool:
         ri = self.room_indices[r]
-        room_type = self.positions[ri].lower()
-        if room_type == ".":
-            return False
+        room_type = self.room_accepts[r]
         for i in range(self.room_len):
-            if self.positions[ri + i].lower() != room_type:
+            if self.positions[ri + i] != room_type:
+                return False
+        return True
+
+    def room_semi_complete(self, r: int) -> bool:
+        ri = self.room_indices[r]
+        room_type = self.room_accepts[r]
+        for i in range(self.room_len):
+            if self.positions[ri + i] not in [room_type, "."]:
                 return False
         return True
 
     def room_first(self, r: int) -> str:
         ri = self.room_indices[r]
         for i in range(self.room_len):
-            if (a := self.positions[ri+i]) != ".":
+            if (a := self.positions[ri + i]) != ".":
                 return a
         raise ValueError("Asked for first from empty room")
 
     def first_in(self, r: int) -> int:
         ri = self.room_indices[r]
         for i in range(self.room_len):
-            if self.positions[ri+i] != '.':
+            if self.positions[ri + i] != '.':
                 return i
         raise ValueError(f"No items in room {r}")
 
@@ -107,7 +102,7 @@ class Burrow:
             if self.positions[ri + i] != '.':
                 if i < 1:
                     raise ValueError(f"Room already full: {r}")
-                return i-1
+                return i - 1
         # completely empty
         return self.room_len - 1
 
@@ -119,30 +114,28 @@ class Burrow:
         new_positions = self.positions.copy()
         new_positions[c] = "."
         new_positions[self.room_indices[r] + dist_in_room] = a
-        return factors[a] * (dist_to_room + dist_in_room), Burrow(new_positions, depth=self.depth+1)
+        return factors[a] * (dist_to_room + dist_in_room), Burrow(new_positions, self.depth + 1, self.room_len)
 
     def move_to_corridor(self, r: int, c: int) -> Tuple[int, Burrow]:
         dist_to_corridor = distances[c][r]
         dist_in_room = self.first_in(r)
         ri = self.room_indices[r]
-        a = self.positions[ri + dist_in_room].lower()
+        a = self.positions[ri + dist_in_room]
         if a == ".":
             raise ValueError("Invalid a")
         new_positions = self.positions.copy()
-        new_positions[ri + dist_in_room ] = "."
+        new_positions[ri + dist_in_room] = "."
         new_positions[c] = a
-        return factors[a] * (dist_in_room + dist_to_corridor), Burrow(new_positions, depth=self.depth+1)
+        return factors[a] * (dist_in_room + dist_to_corridor), Burrow(new_positions, self.depth + 1, self.room_len)
 
     def available_rooms(self, a: str) -> Iterable[int]:
         # return index of viable rooms
         for room in range(len(self.room_indices)):
+            # only if it matches the character
+            if a != self.room_accepts[room]:
+                continue
             # can move in if the room is empty
-            ri = self.room_indices[room]
-            if self.positions[ri + 1] == ".":
-                # Room is empty
-                yield room
-            elif self.positions[ri] == "." and self.positions[ri + 1].lower() == a.lower():
-                # one spot occupied, correct type
+            if self.room_semi_complete(room):
                 yield room
 
     def can_get_to_room(self, c: int, r: int) -> bool:
@@ -176,7 +169,7 @@ class Burrow:
                 break
 
     @classmethod
-    def create(cls, rooms: List[str], corridor = "...........") -> Burrow:
+    def create(cls, rooms: List[str], corridor="...........") -> Burrow:
         new_positions = ["."] * 35
         for r, rc in enumerate(rooms):
             ri = cls.room_indices[r]
@@ -184,15 +177,15 @@ class Burrow:
                 new_positions[ri + i] = a
         for c, cc in enumerate(corridor):
             new_positions[c] = cc
-        return Burrow(new_positions, 0)
+        return Burrow(new_positions, 0, len(rooms[0]))
 
     def print(self) -> None:
         print(f"Depth: {self.depth}")
-        print("#" + "".join(self.positions[self.c_start:self.c_end+1]) + "#")
+        print("#" + "".join(self.positions[self.c_start:self.c_end + 1]) + "#")
         for i in range(self.room_len):
             line = "###" if i == 0 else "  #"
             for r in self.room_indices:
-                line += self.positions[r+i]
+                line += self.positions[r + i]
                 line += "#"
             line += "##" if i == 0 else ""
             print(line)
@@ -209,8 +202,7 @@ class Burrow:
         return "".join(self.positions)
 
 
-def part1(b: Burrow, max_depth=10) -> int:
-
+def part1(b: Burrow, max_depth=35) -> int:
     seen_positions: Set[str] = set()
     heap: List[Tuple[int, Burrow]] = []
     heapq.heappush(heap, (0, b))
@@ -233,11 +225,9 @@ def part1(b: Burrow, max_depth=10) -> int:
                 # don't add already seen
                 if b2.key() in seen_positions:
                     continue
-                heapq.heappush(heap, (cost+c2, b2))
+                heapq.heappush(heap, (cost + c2, b2))
 
         seen_positions.add(position_key)
-
-
 
 
 class TestBurrow(unittest.TestCase):
@@ -307,18 +297,46 @@ class TestBurrow(unittest.TestCase):
         self.assertFalse(b1.room_complete(1))
 
     def test_cost(self):
-        b = Burrow.create([".A", "BB", "CC", ".."], ".....d.d.a.")
+        b = Burrow.create([".A", "BB", "CC", ".."], ".....D.D.A.")
         self.assertEqual(7008, part1(b))
-        b1 = Burrow.create([".A", "BB", "CC", "DA"], ".....d.....")
+        b1 = Burrow.create([".A", "BB", "CC", "DA"], ".....D.....")
         self.assertEqual(9011, part1(b1))
-        b2 = Burrow.create(["BA", ".B", "CC", "DA"], ".....d.....")
+        b2 = Burrow.create(["BA", ".B", "CC", "DA"], ".....D.....")
         self.assertEqual(9051, part1(b2))
-        b3 = Burrow.create(["BA", ".D", "CC", "DA"], "...b.......")
-        self.assertEqual(9051, part1(b3))
+        b3 = Burrow.create(["BA", ".D", "CC", "DA"], "...B.......")
+        self.assertEqual(12081, part1(b3))
+        b4 = Burrow.create(["BA", "CD", ".C", "DA"], "...B.......")
+        self.assertEqual(12481, part1(b4))
+
+    def test_cost2(self):
+        # b = Burrow.create(["BA", "CD", ".C", "DA"], "...B.......")
+        # for m in b.moves():
+        #     print(f"Cost {m[0]}")
+        #     m[1].print()
+        b = Burrow.create(["BA", ".D", ".C", "DA"], "...B.C.....")
+        self.moves(b)
+
+    @staticmethod
+    def moves(b: Burrow):
+        for m in b.moves():
+            print(f"Cost {m[0]}")
+            m[1].print()
 
     def test_part1(self):
         b = Burrow.create(["BA", "CD", "BC", "DA"])
-        part1(b)
+        self.assertEqual(12521, part1(b))
+
+    def test_part2(self):
+        b = Burrow.create(["BDDA", "CCBD", "BBAC", "DACA"])
+        self.assertEqual(44169, part1(b))
+
+    def test_part2_real(self):
+        b = Burrow.create(["BDDC", "BCBA", "DBAA", "DACC"])
+        self.assertEqual(59071, part1(b))
+
+    def test_part1_real(self):
+        b = Burrow.create(["BC", "BA", "DA", "DC"])
+        self.assertEqual(10607, part1(b))
 
     def test_complete(self):
         self.assertTrue(Burrow.create(["aA", "bB", "cC", "dD"]).complete())
